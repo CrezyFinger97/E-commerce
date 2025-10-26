@@ -6,10 +6,11 @@ import { ProductDetailModal } from './components/ProductDetailModal';
 import { UploadProductPage } from './components/UploadProductPage';
 import { ProfilePage } from './components/ProfilePage';
 import { MessagesPage } from './components/MessagesPage';
-import { Toaster } from './components/ui/sonner';
+import { Toaster, toast } from './components/ui/sonner'; // Import 'toast' for notifications
 import { apiCall } from './utils/api';
 import { createClient } from './utils/supabase/client';
 
+// 1. UPDATE INTERFACE: Add the 'status' field
 interface Product {
   id: string;
   title: string;
@@ -21,6 +22,7 @@ interface Product {
   sellerId: string;
   sellerEmail: string;
   createdAt: string;
+  status: 'available' | 'sold'; // Add status field
 }
 
 type View = 'products' | 'messages' | 'profile' | 'upload';
@@ -31,6 +33,8 @@ export default function App() {
   const [currentView, setCurrentView] = useState<View>('products');
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
   const [isUserVerified, setIsUserVerified] = useState(false);
+  // Add state to trigger a refresh of the product listings
+  const [productUpdateKey, setProductUpdateKey] = useState(0); 
 
   const supabase = createClient();
 
@@ -92,6 +96,40 @@ export default function App() {
 
   const handleProductCreated = () => {
     setCurrentView('products');
+    setProductUpdateKey(prev => prev + 1); // Trigger refresh
+  };
+  
+  // New function to handle product status updates (like 'sold')
+  const handleProductUpdate = (updatedProduct: Product) => {
+    // 1. Update the currently selected product in the modal
+    if (selectedProduct && selectedProduct.id === updatedProduct.id) {
+      setSelectedProduct(updatedProduct);
+    }
+    // 2. Trigger a full product listing refresh
+    setProductUpdateKey(prev => prev + 1);
+  }
+
+  // 2. NEW FUNCTION: Logic for marking an item as sold
+  const handleMarkAsSold = async (productId: string) => {
+    if (!isAuthenticated) return toast.error("You must be logged in to update a product.");
+
+    try {
+      // Call the backend API to change the product status to 'sold'
+      const response = await apiCall(`/products/${productId}/status`, {
+        method: 'PATCH', // PATCH is best practice for updating a single field
+        body: JSON.stringify({ status: 'sold' }),
+      });
+      
+      const updatedProduct: Product = await response.json();
+
+      // Update local state and trigger refresh
+      handleProductUpdate(updatedProduct);
+      toast.success(`Product "${updatedProduct.title}" marked as SOLD!`);
+      
+    } catch (error) {
+      console.error('Error marking product as sold:', error);
+      toast.error("Failed to mark item as sold. Please try again.");
+    }
   };
 
   if (checkingAuth) {
@@ -126,7 +164,11 @@ export default function App() {
       
       <main className="min-h-[calc(100vh-64px)]">
         {currentView === 'products' && (
-          <ProductsPage onProductClick={handleProductClick} />
+          // 3. Pass the key to force ProductsPage to refetch data on update
+          <ProductsPage 
+            key={productUpdateKey} 
+            onProductClick={handleProductClick} 
+          />
         )}
         
         {currentView === 'messages' && <MessagesPage />}
@@ -148,6 +190,8 @@ export default function App() {
         open={!!selectedProduct}
         onClose={() => setSelectedProduct(null)}
         onContactSeller={handleContactSeller}
+        // 4. Pass the new function to the modal
+        onMarkAsSold={handleMarkAsSold} 
       />
 
       <Toaster />
